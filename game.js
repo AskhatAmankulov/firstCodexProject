@@ -4,6 +4,12 @@
   const $ = (id) => document.getElementById(id);
   const money = (amount) => `$${amount.toFixed(2)}`;
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const varieties = [
+    { id: 'classic', name: 'Classic chocolate chip', icon: '🍪', cost: 0.40, price: 1.75, demand: 0, description: 'Neighborhood favorite · $0.40 ingredients · suggested price $1.75' },
+    { id: 'double-chocolate', name: 'Double chocolate', icon: '🍫', cost: 0.58, price: 2.50, demand: -1, description: 'Rich cocoa and extra chips · $0.58 ingredients · suggested price $2.50' },
+    { id: 'oatmeal', name: 'Oatmeal raisin', icon: '🥣', cost: 0.46, price: 2.00, demand: -2, description: 'Hearty homestyle treat · $0.46 ingredients · suggested price $2.00' },
+    { id: 'sugar', name: 'Birthday sugar cookie', icon: '🍥', cost: 0.67, price: 3.00, demand: 2, description: 'Colorful bakery special · $0.67 ingredients · suggested price $3.00' },
+  ];
 
   const weather = [
     { name: 'A gentle morning', foot: 'The usual neighborhood crowd', icon: '🌤️', tag: 'Steady', boost: 0, note: 'A familiar day on the block. A thoughtful price and fresh batch should do nicely.' },
@@ -23,8 +29,26 @@
     animating: false,
     weather: null,
     runId: 0,
-    plan: { bake: 30, price: 2, ad: 5 },
+    plan: { bake: 30, variety: 'classic', price: 1.75, ad: 5 },
   };
+
+  function selectedVariety() {
+    return varieties.find((variety) => variety.id === game.plan.variety) || varieties[0];
+  }
+
+  function setVariety(id, resetPrice = true) {
+    game.plan.variety = varieties.some((variety) => variety.id === id) ? id : varieties[0].id;
+    const variety = selectedVariety();
+    $('varietySelect').value = variety.id;
+    $('varietyDescription').textContent = variety.description;
+    $('bakeHint').textContent = `$${variety.cost.toFixed(2)} ingredient cost each`;
+    if (resetPrice) {
+      game.plan.price = variety.price;
+      $('priceInput').value = variety.price.toFixed(2);
+      $('priceRange').value = clamp(variety.price, Number($('priceRange').min), Number($('priceRange').max));
+      $('priceOut').textContent = formatValue('price', variety.price);
+    }
+  }
 
   const fields = [
     ['bake', 'bakeInput', 'bakeRange', 0, 500, 1],
@@ -51,7 +75,7 @@
   }
 
   function updateEstimate() {
-    const spend = game.plan.bake * 0.5 + game.plan.ad;
+    const spend = game.plan.bake * selectedVariety().cost + game.plan.ad;
     $('spendEstimate').textContent = money(spend);
     $('openShop').disabled = game.animating || (!game.closed && spend > game.cash + 1e-8) || (game.day >= 30 && game.closed);
     $('openShop').textContent = game.animating
@@ -67,6 +91,14 @@
     $(inputId).addEventListener('input', () => syncField(key, inputId));
     $(rangeId).addEventListener('input', () => syncField(key, rangeId));
   });
+  varieties.forEach((variety) => {
+    const option = document.createElement('option');
+    option.value = variety.id;
+    option.textContent = `${variety.icon}  ${variety.name} · $${variety.price.toFixed(2)}`;
+    $('varietySelect').append(option);
+  });
+  $('varietySelect').addEventListener('change', () => { setVariety($('varietySelect').value); updateEstimate(); });
+  setVariety(game.plan.variety, false);
 
   function setWeather() {
     game.weather = weather[(game.day * 7 + Math.floor(game.day / 3)) % weather.length];
@@ -90,8 +122,8 @@
       <div class="ledger-row">
         <div class="ledger-day">${entry.day}</div>
         <div class="ledger-info">
-          <strong>${entry.weather} · ${entry.sold} cookies</strong>
-          <span>${money(entry.revenue)} sales · ${money(entry.expenses)} costs</span>
+          <strong>${entry.variety || entry.weather} · ${entry.sold} cookies</strong>
+          <span>${money(entry.price)} each · ${money(entry.revenue)} sales · ${money(entry.expenses)} costs</span>
         </div>
         <div class="ledger-profit ${entry.profit < 0 ? 'negative' : ''}">${entry.profit >= 0 ? '+' : ''}${money(entry.profit)}</div>
       </div>`).join('');
@@ -206,11 +238,12 @@
     if (game.closed) { advanceDay(); return; }
 
     const plan = { ...game.plan };
-    const expenses = plan.bake * 0.5 + plan.ad;
+    const variety = selectedVariety();
+    const expenses = plan.bake * variety.cost + plan.ad;
     if (expenses > game.cash + 1e-8) return;
 
     // Weather, advertising, and price shape the day's cookie demand.
-    const baseDemand = 23 + (game.day * 7 % 11) + game.weather.boost + plan.ad * 1.6;
+    const baseDemand = 23 + (game.day * 7 % 11) + game.weather.boost + plan.ad * 1.6 + variety.demand;
     const priceFactor = clamp(2.65 - plan.price * 0.75, 0.35, 2.4);
     const demand = Math.max(0, Math.round(baseDemand * priceFactor));
     const sold = Math.min(plan.bake, demand);
@@ -218,7 +251,7 @@
     const profit = revenue - expenses;
     game.cash = Math.round((game.cash + profit) * 100) / 100;
 
-    const entry = { day: game.day, sold, revenue, expenses, profit, cash: game.cash, weather: game.weather.name };
+    const entry = { day: game.day, sold, revenue, expenses, profit, cash: game.cash, weather: game.weather.name, variety: variety.name, price: plan.price };
     game.history.push(entry);
     game.closed = true;
     game.animating = true;
@@ -244,7 +277,7 @@
     $('profitVal').textContent = `${entry.profit >= 0 ? '+' : ''}${money(entry.profit)}`;
     $('cashVal').textContent = money(game.cash);
     $('cashDisplay').textContent = money(game.cash);
-    $('closeoutSubtitle').textContent = `${game.weather.name} · ${plan.bake - entry.sold} cookies left over`;
+    $('closeoutSubtitle').textContent = `${entry.variety} at ${money(plan.price)} each · ${plan.bake - entry.sold} left over`;
     $('statusPill').textContent = 'Day closed';
     $('statusPill').classList.add('done');
     $('profitBox').classList.toggle('loss', entry.profit < 0);
@@ -270,7 +303,8 @@
     $('profitBox').classList.add('profit');
     ['soldVal', 'revenueVal', 'expenseVal', 'profitVal'].forEach((id) => { $(id).textContent = '—'; });
     $('cashVal').textContent = money(game.cash);
-    game.plan = { bake: Math.min(30, Math.floor(game.cash / 0.5)), price: 2, ad: 5 };
+    game.plan = { bake: Math.max(0, Math.min(30, Math.floor(game.cash / 0.4))), variety: 'classic', price: 1.75, ad: 5 };
+    setVariety(game.plan.variety, false);
 
     fields.forEach(([key, inputId, rangeId]) => {
       const value = game.plan[key];
@@ -303,7 +337,8 @@
     game.history = [];
     game.closed = false;
     game.animating = false;
-    game.plan = { bake: 30, price: 2, ad: 5 };
+    game.plan = { bake: 30, variety: 'classic', price: 1.75, ad: 5 };
+    setVariety(game.plan.variety, false);
     $('overlay').classList.add('hidden');
     $('shopScene').classList.remove('active');
     $('customerQueue').replaceChildren();
